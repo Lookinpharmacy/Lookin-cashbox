@@ -1,0 +1,8 @@
+build/
+.gradle/
+local.properties
+build-fw/
+out/
+# กุญแจลงชื่อแอป ห้ามอยู่ใน repo (เก็บใน GitHub Secrets)
+*.keystore
+*.jks

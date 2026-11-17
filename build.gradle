@@ -1,0 +1,56 @@
+plugins {
+    id 'com.android.application'
+}
+
+def buildNo = Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER") ?: "1")
+def ksFile = System.getenv("CASHBOX_KEYSTORE_FILE")
+def ksPass = System.getenv("CASHBOX_KEYSTORE_PASS")
+
+android {
+    namespace 'com.lookin.cashbox'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.lookin.cashbox'
+        minSdk 21
+        targetSdk 33
+        versionCode buildNo
+        versionName "0." + buildNo
+    }
+
+    // กุญแจลงชื่อแอปไม่อยู่ใน repo: GitHub Actions ถอดจาก Secrets แล้วส่งตำแหน่งไฟล์/รหัสผ่านมาทางตัวแปรแวดล้อม
+    signingConfigs {
+        shop {
+            if (ksFile) {
+                storeFile file(ksFile)
+                storePassword ksPass
+                keyAlias 'cashbox'
+                keyPassword ksPass
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (ksFile) signingConfig signingConfigs.shop
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures { buildConfig true }
+
+    lint { checkReleaseBuilds false; abortOnError false }
+}
+
+dependencies {
+    implementation 'com.github.mik3y:usb-serial-for-android:3.8.1'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
