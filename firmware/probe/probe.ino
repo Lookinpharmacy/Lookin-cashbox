@@ -5,6 +5,7 @@
   ทำอะไร
    - ทุกขา (ยกเว้น D0/D1 ที่ต่อ USB) ตั้งเป็น INPUT (ไม่จ่ายไฟออก)
      รวมขาส่งของพอร์ต serial (D14/D16/D18) ด้วย: เปิดเฉพาะตัวรับ ตัวส่งปิดไว้ จะเปิดชั่วคราวตอนสั่ง SEND เท่านั้น
+     ขาส่งที่ปิดไว้ตั้ง INPUT_PULLUP เสมอ (ระดับพักของสาย serial) กันชิป MAX3232 บนบอร์ดฐานส่งสัญญาณมั่วไปเครื่องรับแบงก์
    - ขาไหนเปลี่ยน 0/1 พิมพ์บอก พร้อมนับพัลส์ (เครื่องรับเหรียญมักส่งเป็นพัลส์)
    - ฟัง Serial1 (D18/D19), Serial2 (D16/D17), Serial3 (D14/D15) พร้อมกัน พิมพ์ไบต์ที่เข้ามาเป็นเลขฐาน 16
      ค่าเริ่ม 9600 8E1 (แบบเครื่องรับแบงก์ ICT) เปลี่ยนได้ด้วยคำสั่ง BAUD
@@ -23,7 +24,7 @@
 */
 #include <avr/boot.h>
 
-#define FW "probe-1.1"
+#define FW "probe-1.2"
 #define NPIN 70                // D0..D53 + A0..A15 (A0 = 54)
 #define ARM_MS 60000UL
 #define DEBOUNCE_MS 2
@@ -65,7 +66,8 @@ static void setupPins() {
     // D14/D16/D18 (ขาส่ง) ตัวส่งปิดอยู่ จึงเฝ้าดูเหมือนขาธรรมดาได้
     watch[p] = !(p <= 1 || p == 15 || p == 17 || p == 19);
     if (!watch[p]) continue;
-    pinMode(p, pullup ? INPUT_PULLUP : INPUT);
+    bool tx = (p == 14 || p == 16 || p == 18);
+    pinMode(p, (pullup || tx) ? INPUT_PULLUP : INPUT);
   }
   delay(5);
   for (uint8_t p = 0; p < NPIN; p++) if (watch[p]) { lastVal[p] = digitalRead(p); lastChange[p] = millis(); burst[p] = 0; }
@@ -105,7 +107,8 @@ static void doPulse(int p, long ms, bool high) {
   pinMode(p, OUTPUT);
   unsigned long t0 = millis();
   while (millis() - t0 < (unsigned long)ms) { }
-  pinMode(p, pullup ? INPUT_PULLUP : INPUT);
+  bool tx = (p == 14 || p == 16 || p == 18);
+  pinMode(p, (pullup || tx) ? INPUT_PULLUP : INPUT);
   stamp(); Serial.println(F("PULSE END (ขากลับเป็น INPUT แล้ว)"));
 }
 
