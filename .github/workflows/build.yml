@@ -1,0 +1,82 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---------- เฟิร์มแวร์บอร์ด MEGA (ทำก่อน: ไม่ต้องใช้กุญแจลงชื่อแอป) ----------
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Build firmware
+        run: |
+          mkdir -p out
+          arduino-cli core update-index
+          arduino-cli core install arduino:avr
+          for d in firmware/*/ ; do
+            n=$(basename "$d")
+            [ -f "$d/$n.ino" ] || continue
+            arduino-cli compile -b arduino:avr:mega:cpu=atmega2560 --output-dir "build-fw/$n" "$d"
+            cp "build-fw/$n/$n.ino.hex" "out/$n.hex"
+          done
+          ls -la out
+
+      - name: Release firmware
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Lookin Cashbox v${{ github.run_number }}
+          files: out/*.hex
+          make_latest: true
+
+      # ---------- แอปบนจอตู้ ----------
+      - name: Signing key
+        env:
+          KS_B64: ${{ secrets.CASHBOX_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.CASHBOX_KEYSTORE_PASS }}
+        run: |
+          if [ -z "$KS_B64" ] || [ -z "$KS_PASS" ]; then
+            echo "::error::ยังไม่ได้ใส่ Secrets CASHBOX_KEYSTORE_B64 / CASHBOX_KEYSTORE_PASS (Settings > Secrets and variables > Actions)"
+            exit 1
+          fi
+          printf '%s' "$KS_B64" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/cashbox.keystore"
+          echo "CASHBOX_KEYSTORE_FILE=$RUNNER_TEMP/cashbox.keystore" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build APK
+        env:
+          CASHBOX_KEYSTORE_PASS: ${{ secrets.CASHBOX_KEYSTORE_PASS }}
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Copy APK
+        run: cp app/build/outputs/apk/release/app-release.apk out/cashbox.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lookin-cashbox
+          path: out/*
+
+      - name: Release app
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Lookin Cashbox v${{ github.run_number }}
+          files: out/cashbox.apk
+          make_latest: true
