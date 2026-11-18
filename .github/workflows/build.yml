@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ---------- เฟิร์มแวร์บอร์ด MEGA (ทำก่อน: ไม่ต้องใช้กุญแจลงชื่อแอป) ----------
+      # ---------- เฟิร์มแวร์บอร์ด MEGA ----------
       - uses: arduino/setup-arduino-cli@v2
 
       - name: Build firmware
@@ -29,14 +29,6 @@ jobs:
             cp "build-fw/$n/$n.ino.hex" "out/$n.hex"
           done
           ls -la out
-
-      - name: Release firmware
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ github.run_number }}
-          name: Lookin Cashbox v${{ github.run_number }}
-          files: out/*.hex
-          make_latest: true
 
       # ---------- แอปบนจอตู้ ----------
       - name: Signing key
@@ -73,10 +65,12 @@ jobs:
           name: lookin-cashbox
           path: out/*
 
-      - name: Release app
+      # ออก Release ครั้งเดียวหลังสร้างครบทั้งเฟิร์มแวร์และแอป
+      # (เดิมออก Release เฟิร์มแวร์ก่อน ถ้าสร้างแอปพัง ลิงก์ releases/latest/download/cashbox.apk จะใช้ไม่ได้)
+      - name: Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
           name: Lookin Cashbox v${{ github.run_number }}
-          files: out/cashbox.apk
+          files: out/*
           make_latest: true

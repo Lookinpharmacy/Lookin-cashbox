@@ -33,17 +33,18 @@ public class Board {
     private UsbSerialPort port;
     private Thread reader;
     private volatile boolean running = true;
-    private boolean asked = false;
+    private long askedAt = 0;   // เวลาที่ขออนุญาต USB ล่าสุด (0 = ยังไม่ได้ขอ/ได้คำตอบแล้ว)
     public volatile boolean connected = false;
 
     public Board(Context c, Listener l) {
         ctx = c.getApplicationContext(); ls = l;
-        ctx.registerReceiver(permRx, new IntentFilter(ACTION_PERM));
+        if (Build.VERSION.SDK_INT >= 33) ctx.registerReceiver(permRx, new IntentFilter(ACTION_PERM), Context.RECEIVER_NOT_EXPORTED);
+        else ctx.registerReceiver(permRx, new IntentFilter(ACTION_PERM));
         ui.post(tick);
     }
 
     private final BroadcastReceiver permRx = new BroadcastReceiver() {
-        @Override public void onReceive(Context c, Intent i) { asked = false; ui.post(Board.this::tryOpen); }
+        @Override public void onReceive(Context c, Intent i) { askedAt = 0; ui.post(Board.this::tryOpen); }
     };
 
     private final Runnable tick = new Runnable() {
@@ -62,8 +63,9 @@ public class Board {
         UsbSerialDriver d = list.get(0);
         UsbDevice dev = d.getDevice();
         if (!m.hasPermission(dev)) {
-            if (!asked) {
-                asked = true;
+            // ขอใหม่ได้ถ้าไม่ได้คำตอบใน 60 วินาที (เดิมขอครั้งเดียว ถ้ากดปฏิเสธต้องปิดเปิดแอปเอง)
+            if (askedAt == 0 || System.currentTimeMillis() - askedAt > 60000) {
+                askedAt = System.currentTimeMillis();
                 int fl = Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0;
                 Intent pi = new Intent(ACTION_PERM); pi.setPackage(ctx.getPackageName());
                 m.requestPermission(dev, PendingIntent.getBroadcast(ctx, 0, pi, fl));

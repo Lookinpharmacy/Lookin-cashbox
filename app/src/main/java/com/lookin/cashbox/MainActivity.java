@@ -26,6 +26,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.text.NumberFormat;
+import java.util.Iterator;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -73,7 +74,12 @@ public class MainActivity extends Activity implements Board.Listener {
         ui.postDelayed(depWatch, 10000);
     }
 
-    @Override protected void onDestroy() { board.stop(); bg.shutdown(); super.onDestroy(); }
+    @Override protected void onDestroy() {
+        destroyed = true;
+        ui.removeCallbacksAndMessages(null);   // หยุดตัวจับเวลาทั้งหมด กันเรียกงานพื้นหลังหลัง bg ปิดแล้ว (แอปเด้ง)
+        board.stop(); bg.shutdown(); super.onDestroy();
+    }
+    boolean destroyed = false;
     @Override public void onBackPressed() { if (!"home".equals(screen) && !"deposit".equals(screen)) showHome(); }
     @Override public void onWindowFocusChanged(boolean f) { super.onWindowFocusChanged(f); if (f) immersive(); }
     void immersive() {
@@ -185,21 +191,37 @@ public class MainActivity extends Activity implements Board.Listener {
         board.send("ACCEPT ON");
         renderDeposit();
     }
+    // รวมทุกชนิดที่อยู่ในรายการ (รวมชนิดที่ไม่อยู่ใน NOTE_V/COIN_V ด้วย ยอดต้องตรงกับเงินจริงในตู้เสมอ)
     static double total(JSONObject d) {
+        return d == null ? 0 : sum(d.optJSONObject("notes"), "n") + sum(d.optJSONObject("coins"), "c");
+    }
+    static double sum(JSONObject g, String pre) {
         double t = 0;
-        JSONObject n = d.optJSONObject("notes"), c = d.optJSONObject("coins");
-        for (int v : NOTE_V) t += v * (n == null ? 0 : n.optInt("n" + v));
-        for (int v : COIN_V) t += v * (c == null ? 0 : c.optInt("c" + v));
+        if (g == null) return 0;
+        for (Iterator<String> it = g.keys(); it.hasNext(); ) {
+            String k = it.next();
+            if (!k.startsWith(pre)) continue;
+            try { t += Integer.parseInt(k.substring(pre.length())) * (double) g.optInt(k); } catch (Exception ignored) {}
+        }
         return t;
+    }
+    static void listItems(StringBuilder s, JSONObject g, String pre, String label, int[] order) {
+        if (g == null) return;
+        for (int v : order) { int k = g.optInt(pre + v); if (k > 0) s.append(label).append(v).append(" × ").append(k).append("\n"); }
+        for (Iterator<String> it = g.keys(); it.hasNext(); ) {
+            String key = it.next();
+            boolean known = false;
+            for (int v : order) if (key.equals(pre + v)) known = true;
+            if (!known && key.startsWith(pre) && g.optInt(key) > 0) s.append(label).append(key.substring(pre.length())).append(" × ").append(g.optInt(key)).append("\n");
+        }
     }
     void renderDeposit() {
         JSONObject d = st.currentDeposit();
         if (d == null || depTotal == null) return;
         depTotal.setText(money(total(d)) + " ฿");
         StringBuilder s = new StringBuilder();
-        JSONObject n = d.optJSONObject("notes"), c = d.optJSONObject("coins");
-        for (int v : NOTE_V) { int k = n.optInt("n" + v); if (k > 0) s.append("แบงก์ ").append(v).append(" × ").append(k).append("\n"); }
-        for (int v : COIN_V) { int k = c.optInt("c" + v); if (k > 0) s.append("เหรียญ ").append(v).append(" × ").append(k).append("\n"); }
+        listItems(s, d.optJSONObject("notes"), "n", "แบงก์ ", NOTE_V);
+        listItems(s, d.optJSONObject("coins"), "c", "เหรียญ ", COIN_V);
         depDetail.setText(s.length() == 0 ? "ยังไม่มีเงินเข้า" : s.toString().trim());
     }
     void addMoney(boolean note, int value) {
@@ -207,10 +229,11 @@ public class MainActivity extends Activity implements Board.Listener {
         try {
             if (d == null) {   // เงินเข้าโดยไม่ได้กดฝาก (ไม่ควรเกิด) — เก็บไว้เป็นการฝากที่ไม่ระบุชื่อ
                 d = new JSONObject();
-                d.put("uid", Store.uid(st.box(), "d")); d.put("staff", "ไม่ระบุ (เงินเข้าเอง)"); d.put("kind", "shift");
+                d.put("uid", Store.uid(st.box(), "d")); d.put("staff", "ไม่ระบุ (เงินเข้าเอง" + (st.lastStaff().isEmpty() ? "" : " หลังการฝากของ " + st.lastStaff()) + ")"); d.put("kind", "shift");
                 d.put("startedAt", Store.now()); d.put("notes", new JSONObject()); d.put("coins", new JSONObject());
             }
-            JSONObject g = d.getJSONObject(note ? "notes" : "coins");
+            JSONObject g = d.optJSONObject(note ? "notes" : "coins");
+            if (g == null) { g = new JSONObject(); d.put(note ? "notes" : "coins", g); }
             String k = (note ? "n" : "c") + value;
             g.put(k, g.optInt(k) + 1);
             st.setCurrentDeposit(d);
@@ -218,7 +241,7 @@ public class MainActivity extends Activity implements Board.Listener {
         depTouch();
         if (!"deposit".equals(screen)) showDeposit(); else renderDeposit();
         // แบงก์ที่เครื่องกำลังกลืนอยู่ตอนกด ฝากเสร็จ เข้ามาทีหลัง -> ปรับยอดในหน้าต่างยืนยันให้ตรง
-        if (confirmDlg != null && confirmDlg.isShowing()) { JSONObject n = st.currentDeposit(); if (n != null) confirmDlg.setMessage(confirmText(n)); }
+        if (confirmDlg != null && confirmDlg.isShowing()) { JSONObject n = st.currentDeposit(); if (n != null) confirmDlg.setMessage(confirmText(n) + (acceptOff ? "" : WAIT_OFF)); }
     }
 
     // closing = กด ฝากเสร็จ แล้ว กำลังปิดรับเงิน/รอยืนยัน (ระหว่างนี้ถ้าบอร์ดตอบ BUSY ต้องสั่งปิดรับซ้ำ)
@@ -247,23 +270,44 @@ public class MainActivity extends Activity implements Board.Listener {
         flushNow();
         return t;
     }
+    // ปุ่ม ยืนยัน จะกดได้หลังบอร์ดตอบ ACCEPT OFF แล้วเท่านั้น
+    // (กันแบงก์ที่เครื่องกำลังกลืนอยู่เข้ามาหลังบันทึกไปแล้ว กลายเป็นเงินไม่มีเจ้าของ)
+    static final String WAIT_OFF = "\n\n(กำลังปิดรับเงิน รอสักครู่...)";
+    boolean acceptOff = false;
+    final Runnable acceptOffTimeout = this::acceptClosed;   // บอร์ดไม่ตอบ/หลุด: ให้กดยืนยันได้หลังรอครบเวลา
     void finishDeposit() {
         if (confirmDlg != null && confirmDlg.isShowing()) return;
         JSONObject d = st.currentDeposit();
-        closing = true; depTouch();
+        closing = true; acceptOff = false; depTouch();
         board.send("ACCEPT OFF");
         if (d == null) { closing = false; showHome(); return; }
-        if (total(d) <= 0) { closing = false; st.setCurrentDeposit(null); showHome(); return; }
+        ui.removeCallbacks(acceptOffTimeout);
+        ui.postDelayed(acceptOffTimeout, 8000);
         confirmDlg = new AlertDialog.Builder(this).setTitle("ยืนยันฝากเงิน")
-                .setMessage(confirmText(d))
+                .setMessage(confirmText(d) + WAIT_OFF)
                 .setCancelable(false)
                 .setPositiveButton("ยืนยัน", (x, w) -> {
-                    closing = false;
+                    closing = false; ui.removeCallbacks(acceptOffTimeout);
                     double t = commitDeposit("");
                     if (t < 0) { alert("บันทึกการฝากไม่ได้ ลองกด ฝากเสร็จ อีกครั้ง"); board.send("ACCEPT ON"); return; }
-                    showDone(t);
+                    if (t > 0) showDone(t); else showHome();
                 })
-                .setNegativeButton("ฝากต่อ", (x, w) -> { closing = false; depTouch(); board.send("ACCEPT ON"); }).show();
+                .setNegativeButton("ฝากต่อ", (x, w) -> { closing = false; ui.removeCallbacks(acceptOffTimeout); depTouch(); board.send("ACCEPT ON"); }).create();
+        confirmDlg.show();
+        confirmDlg.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+    }
+    /** บอร์ดปิดรับเงินแล้ว (หรือรอจนหมดเวลา) */
+    void acceptClosed() {
+        ui.removeCallbacks(acceptOffTimeout);
+        if (!closing) return;
+        acceptOff = true;
+        if (confirmDlg == null || !confirmDlg.isShowing()) return;
+        JSONObject d = st.currentDeposit();
+        if (d == null || total(d) <= 0) {   // ไม่มีเงินเข้าเลย: ปิดการฝากเปล่า ๆ
+            confirmDlg.dismiss(); closing = false; st.setCurrentDeposit(null); showHome(); return;
+        }
+        confirmDlg.setMessage(confirmText(d));
+        confirmDlg.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);
     }
     void showDone(double t) {
         clear("done");
@@ -278,7 +322,7 @@ public class MainActivity extends Activity implements Board.Listener {
             ui.postDelayed(this, 10000);
             if (!"deposit".equals(screen) || depLast == 0 || System.currentTimeMillis() - depLast < DEP_IDLE_MS) return;
             if (confirmDlg != null && confirmDlg.isShowing()) confirmDlg.dismiss();
-            closing = false;
+            closing = false; ui.removeCallbacks(acceptOffTimeout);
             board.send("ACCEPT OFF");
             double t = commitDeposit(" (ปิดอัตโนมัติ)");
             if (t < 0) { depTouch(); return; }
@@ -301,7 +345,8 @@ public class MainActivity extends Activity implements Board.Listener {
     }
     void requestOtp(String id, String name) {
         if (!board.connected) { alert("ยังติดต่อบอร์ดในตู้ไม่ได้"); return; }
-        openUser = id; openName = name; code = "";
+        openUser = id; openName = name; code = ""; nonceGot = false;
+        final int gen = ++openGen;
         clear("openCode");
         body.addView(text("เปิดตู้ — " + name, 22, Color.DKGRAY, true));
         openMsg = text("กำลังขอรหัส...", 19, Color.GRAY, false);
@@ -313,7 +358,12 @@ public class MainActivity extends Activity implements Board.Listener {
         body.addView(keypad());
         body.addView(button("ยกเลิก", Color.GRAY, v -> showHome()));
         board.send("OPENREQ");
+        ui.postDelayed(() -> {
+            if (gen == openGen && "openCode".equals(screen) && !nonceGot) { openMsg.setText("✗ บอร์ดไม่ตอบ กด ยกเลิก แล้วลองใหม่"); openMsg.setTextColor(Color.rgb(198, 40, 40)); }
+        }, 8000);
     }
+    int openGen = 0;          // เพิ่มทุกครั้งที่เริ่มขอเปิดตู้ใหม่ (กันตัวจับเวลาของรอบก่อนมาเตะหน้าจอรอบใหม่)
+    boolean nonceGot = false;
     View keypad() {
         GridLayout g = new GridLayout(this);
         g.setColumnCount(3);
@@ -332,7 +382,12 @@ public class MainActivity extends Activity implements Board.Listener {
     }
     void keyPress(String s) {
         if ("⌫".equals(s)) { if (code.length() > 0) code = code.substring(0, code.length() - 1); }
-        else if ("ตกลง".equals(s)) { if (code.length() == 6) { board.send("OTP " + code); openMsg.setText("กำลังตรวจรหัส..."); code = ""; } }
+        else if ("ตกลง".equals(s)) {
+            if (code.length() == 6) {
+                if (board.send("OTP " + code)) { openMsg.setText("กำลังตรวจรหัส..."); openMsg.setTextColor(Color.DKGRAY); code = ""; }
+                else { openMsg.setText("✗ ส่งรหัสให้บอร์ดไม่ได้ (ตรวจสาย USB) แล้วกด ตกลง อีกครั้ง"); openMsg.setTextColor(Color.rgb(198, 40, 40)); }
+            }
+        }
         else if (code.length() < 6) code += s;
         StringBuilder v = new StringBuilder(code);
         while (v.length() < 6) v.append('_');
@@ -356,22 +411,32 @@ public class MainActivity extends Activity implements Board.Listener {
             else if (!want && accept.equals("on")) board.send("ACCEPT OFF");         // บอร์ดยังเปิดรับทั้งที่ไม่ได้ฝาก
             refreshStatus();
         } else if ((c.equals("NOTE") || c.equals("COIN")) && p.length >= 3) {
-            int v; try { v = Integer.parseInt(p[2].trim()); } catch (Exception e) { board.send("ACK " + p[1]); return; }
+            int v; try { v = Integer.parseInt(p[2].trim()); } catch (Exception e) {
+                // มูลค่าอ่านไม่ได้: ตอบรับกันบอร์ดส่งซ้ำไม่จบ แต่บันทึกเหตุการณ์ไว้ให้เจ้าของตรวจ (เงินเข้าตู้ไปแล้ว)
+                if (!st.seen("m" + p[1])) queueEvent("bad_value", line);
+                board.send("ACK " + p[1]); return;
+            }
             if (!st.seen("m" + p[1])) addMoney(c.equals("NOTE"), v);   // บันทึกลงเครื่องก่อน แล้วค่อยตอบรับ
             board.send("ACK " + p[1]);
         } else if (c.equals("EV") && p.length >= 3) {
             board.send("ACK " + p[1]);
             if (!st.seen("e" + p[1])) queueEventUid(st.box() + "-b" + p[1].replace('.', '-') + "-" + Long.toString(System.currentTimeMillis() / 1000, 36), p[2], p.length > 3 ? p[3] : "");
         } else if (c.equals("NONCE") && p.length >= 2 && "openCode".equals(screen)) {
+            nonceGot = true;
             sendOtpRequest(p[1].trim());
         } else if (c.equals("UNLOCK")) {
             if (openMsg != null) { openMsg.setText("✓ ปลดกลอนแล้ว เปิดประตูได้เลย\nเก็บเงินเสร็จแล้วปิดประตูให้สนิท"); openMsg.setTextColor(Color.rgb(31, 138, 76)); openMsg.setTextSize(26); }
-            ui.postDelayed(() -> { if ("openCode".equals(screen)) showHome(); }, 60000);
+            final int gen = openGen;
+            ui.postDelayed(() -> { if (gen == openGen && "openCode".equals(screen)) showHome(); }, 60000);
         } else if (c.equals("OTP") && p.length >= 2) {
             if (openMsg == null) return;
             if (p[1].equals("FAIL")) { openMsg.setText("✗ รหัสไม่ถูกต้อง ลองได้อีก " + (p.length > 2 ? p[2] : "") + " ครั้ง"); openMsg.setTextColor(Color.rgb(198, 40, 40)); }
             else if (p[1].equals("LOCK")) { openMsg.setText("✗ ใส่ผิดเกินกำหนด กด ยกเลิก แล้วขอรหัสใหม่"); openMsg.setTextColor(Color.rgb(198, 40, 40)); }
+        } else if (c.equals("ACCEPT") && p.length >= 2) {
+            accept = p[1].trim().toLowerCase(Locale.ROOT);
+            if (closing && "off".equals(accept)) acceptClosed();
         } else if (c.equals("BUSY")) {
+            if (closing) { ui.removeCallbacks(acceptOffTimeout); ui.postDelayed(acceptOffTimeout, 8000); }   // ยังกลืนแบงก์อยู่ รอต่อ
             ui.postDelayed(() -> { if (closing || !"deposit".equals(screen)) board.send("ACCEPT OFF"); }, 1500);
         }
     }
@@ -419,12 +484,15 @@ public class MainActivity extends Activity implements Board.Listener {
         flushing = true;
         bg.execute(() -> {
             String err = null;
+            boolean sent = false;
+            try {
             for (int i = 0; i < 50; i++) {
                 JSONArray q = st.queue();
                 if (q.length() == 0) break;
                 JSONObject j = q.optJSONObject(0);
+                if (j == null || j.optJSONObject("body") == null) { st.dropFirst(); continue; }   // รายการเสีย ข้ามไป (ไม่ให้คิวค้าง/แอปเด้ง)
                 Net.Result r = Net.post(st, j.optString("path"), j.optJSONObject("body"));
-                if (r.ok()) { st.dropFirst(); continue; }
+                if (r.ok()) { st.dropFirst(); sent = true; continue; }
                 if (r.status >= 400 && r.status < 500 && r.status != 403 && r.status != 429) {
                     // เครื่องร้านไม่รับ ส่งซ้ำก็ไม่ผ่าน: เหตุการณ์ทิ้งได้ แต่รายการฝากเงินต้องเก็บไว้ (เงินอยู่ในตู้แล้ว)
                     if (j.optString("path").endsWith("/deposit")) st.parkFirst(r.message()); else st.dropFirst();
@@ -432,31 +500,38 @@ public class MainActivity extends Activity implements Board.Listener {
                 }
                 err = r.message(); break;
             }
+            } catch (Exception e) { err = "ส่งคิวไม่ได้ (" + e.getClass().getSimpleName() + ")"; }
             final String e2 = err;
-            ui.post(() -> { flushing = false; if (e2 != null) { serverOk = false; serverMsg = e2; } refreshStatus(); });
+            final boolean ok = sent;
+            ui.post(() -> {
+                flushing = false;
+                if (e2 != null) { serverOk = false; serverMsg = e2; } else if (ok) { serverOk = true; serverMsg = ""; }
+                if (!destroyed) refreshStatus();
+            });
         });
     }
 
     final Runnable flushLoop = new Runnable() { @Override public void run() { flushNow(); ui.postDelayed(this, 15000); } };
     final Runnable pinger = new Runnable() { @Override public void run() { if (board.connected) board.send("PING"); ui.postDelayed(this, 5000); } };
-    final Runnable helloLoop = new Runnable() {
-        @Override public void run() {
-            ui.postDelayed(this, 60000);
-            if (!st.configured()) return;
-            final String d = door, l = lock;
-            bg.execute(() -> {
-                JSONObject o = new JSONObject();
-                try { o.put("fw", fw); o.put("app", APP_VER); o.put("door", d); o.put("lock", l); } catch (Exception ignored) {}
-                Net.Result r = Net.post(st, "/api/cashbox/dev/hello", o);
-                ui.post(() -> {
-                    serverOk = r.ok();
-                    serverMsg = r.ok() ? "" : r.message();
-                    if (r.ok()) { managers = r.json.optJSONArray("managers"); if (managers == null) managers = new JSONArray(); title.setText("ตู้เก็บเงิน · " + r.json.optString("name")); }
-                    refreshStatus();
-                });
+    final Runnable helloLoop = new Runnable() { @Override public void run() { ui.postDelayed(this, 60000); hello(null); } };
+    /** แจ้งเครื่องร้านว่าตู้ยังอยู่ + รับรายชื่อผู้จัดการ  done ถูกเรียกเมื่อรู้ผลแล้ว */
+    void hello(final Runnable done) {
+        if (!st.configured() || destroyed) { if (done != null) done.run(); return; }
+        final String d = door, l = lock, f = fw;
+        bg.execute(() -> {
+            JSONObject o = new JSONObject();
+            try { o.put("fw", f); o.put("app", APP_VER); o.put("door", d); o.put("lock", l); } catch (Exception ignored) {}
+            Net.Result r = Net.post(st, "/api/cashbox/dev/hello", o);
+            ui.post(() -> {
+                if (destroyed) return;
+                serverOk = r.ok();
+                serverMsg = r.ok() ? "" : r.message();
+                if (r.ok()) { managers = r.json.optJSONArray("managers"); if (managers == null) managers = new JSONArray(); title.setText("ตู้เก็บเงิน · " + r.json.optString("name")); }
+                refreshStatus();
+                if (done != null) done.run();
             });
-        }
-    };
+        });
+    }
 
     // ---------------------------------------------------------------- ตั้งค่า
     void askSettings() {
@@ -475,11 +550,14 @@ public class MainActivity extends Activity implements Board.Listener {
         final EditText box = field("ตู้นี้คือ b1 / b2 / b3", st.box());
         final EditText key = field("รหัสตู้ (จากหน้า ตู้เก็บเงิน ในเครื่องคลัง)", st.key());
         body.addView(button("บันทึกและทดสอบ", Color.rgb(21, 101, 192), v -> {
-            st.save(url.getText().toString(), box.getText().toString(), key.getText().toString());
+            String bx = box.getText().toString().trim().toLowerCase(Locale.ROOT);
+            if (!bx.matches("b[0-9]+")) { alert("รหัสตู้ต้องเป็น b1 / b2 / b3"); return; }
+            if (url.getText().toString().trim().isEmpty() || key.getText().toString().trim().isEmpty()) { alert("ใส่ที่อยู่เครื่องร้านและรหัสตู้ให้ครบ"); return; }
+            st.save(url.getText().toString(), bx, key.getText().toString());
             st.unparkAll();   // ค่าตั้งเปลี่ยนแล้ว ลองส่งรายการฝากที่เคยถูกปฏิเสธใหม่
-            serverMsg = "กำลังทดสอบ..."; refreshStatus();
-            ui.removeCallbacks(helloLoop); ui.post(helloLoop);
-            ui.postDelayed(() -> alert(serverOk ? "✓ ติดต่อเครื่องร้านได้" : "✗ " + serverMsg), 4000);
+            serverOk = false; serverMsg = "กำลังทดสอบ..."; refreshStatus();
+            // รอผลทดสอบจริง (เดิมรอ 4 วินาทีแล้วอ่านค่าเก่า อาจขึ้น ✓ ทั้งที่ที่อยู่ใหม่ผิด)
+            hello(() -> { alert(serverOk ? "✓ ติดต่อเครื่องร้านได้" : "✗ " + serverMsg); if (serverOk) flushNow(); });
         }));
         TextView info = text("แอป " + APP_VER + " · บอร์ด " + fw + "\nรอส่ง " + st.queue().length() + " รายการ · เครื่องร้านไม่รับ " + st.parked().length() + " รายการ (กด บันทึกและทดสอบ เพื่อส่งใหม่)", 16, Color.GRAY, false);
         body.addView(info);
@@ -493,5 +571,8 @@ public class MainActivity extends Activity implements Board.Listener {
         body.addView(e, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return e;
     }
-    void alert(String m) { new AlertDialog.Builder(this).setMessage(m).setPositiveButton("ตกลง", null).show(); }
+    void alert(String m) {
+        if (destroyed || isFinishing()) return;
+        new AlertDialog.Builder(this).setMessage(m).setPositiveButton("ตกลง", null).show();
+    }
 }

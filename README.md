@@ -9,7 +9,7 @@
 
 ทุกครั้งที่อัปโหลดไฟล์ใหม่ GitHub Actions จะสร้าง `cashbox.apk` และไฟล์ `.hex` ไว้ในหน้า Releases
 
-ลิงก์ติดตั้งแอปบนจอตู้: `https://github.com/<ชื่อบัญชี>/lookin-cashbox/releases/latest/download/cashbox.apk`
+ลิงก์ติดตั้งแอปบนจอตู้: `https://github.com/Lookinpharmacy/Lookin-cashbox/releases/latest/download/cashbox.apk`
 
 รหัสลับ OTP ไม่อยู่ใน repo นี้ (อยู่ในเครื่องคลังและบอร์ดเท่านั้น)
 

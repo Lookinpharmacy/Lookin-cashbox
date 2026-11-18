@@ -24,9 +24,18 @@ public class Store {
     public boolean configured() { return url().length() > 0 && box().length() > 0 && key().length() > 0; }
     public void save(String url, String box, String key) {
         url = url.trim();
-        if (url.length() > 0 && !url.startsWith("http")) url = "http://" + url;
-        if (url.endsWith("/")) url = url.substring(0, url.length() - 1);
-        if (url.length() > 0 && !url.matches(".*:\\d+$")) url = url + ":3001";
+        while (url.endsWith("/")) url = url.substring(0, url.length() - 1);
+        if (url.length() > 0) {
+            String scheme = "http://";
+            String low = url.toLowerCase(Locale.ROOT);
+            if (low.startsWith("https://")) { scheme = "https://"; url = url.substring(8); }
+            else if (low.startsWith("http://")) url = url.substring(7);
+            // ใส่พอร์ต 3001 เฉพาะเมื่อส่วนชื่อเครื่องยังไม่มีพอร์ต (เดิมไปต่อท้าย path ทำให้ที่อยู่เสีย)
+            int slash = url.indexOf('/');
+            String host = slash < 0 ? url : url.substring(0, slash), rest = slash < 0 ? "" : url.substring(slash);
+            if (!host.contains(":")) host = host + ":3001";
+            url = scheme + host + rest;
+        }
         p.edit().putString("url", url).putString("box", box.trim().toLowerCase(Locale.ROOT)).putString("key", key.trim().toUpperCase(Locale.ROOT)).apply();
     }
     public String lastStaff() { return p.getString("lastStaff", ""); }

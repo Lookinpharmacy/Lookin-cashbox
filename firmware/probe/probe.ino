@@ -101,7 +101,8 @@ static int parsePin(const char* s) {
 static void doPulse(int p, long ms, bool high) {
   if (!armed()) { Serial.println(F("ยังไม่ได้ ARM (พิมพ์ ARM ก่อน ใช้ได้ 60 วินาที)")); return; }
   if (p < 0 || !watch[p]) { Serial.println(F("ขานี้สั่งไม่ได้")); return; }
-  if (ms < 10) ms = 10; if (ms > 2000) ms = 2000;
+  if (ms < 10) ms = 10;
+  if (ms > 2000) ms = 2000;
   stamp(); Serial.print(F("PULSE ")); pinName(p); Serial.print(high ? F(" HIGH ") : F(" LOW ")); Serial.print(ms); Serial.println(F(" ms"));
   digitalWrite(p, high ? HIGH : LOW);
   pinMode(p, OUTPUT);
@@ -181,7 +182,7 @@ static void pollPorts() {
       Serial.print(' '); if (b < 16) Serial.print('0'); Serial.print(b, HEX);
       portCount[i]++; portLast[i] = now;
       // เครื่องรับแบงก์ ICT เปิดเครื่องแล้วส่ง 80 8F รอให้ตอบ 02
-      if (b == 0x80) ictStage[i] = 1; else if (b == 0x8F && ictStage[i] == 1) { ictStage[i] = 2; } else ictStage[i] = 0;
+      if (b == 0x80) ictStage[i] = 1; else if (b == 0x8F && ictStage[i] == 1) { ictStage[i] = 2; } else if (ictStage[i] < 2) ictStage[i] = 0;
       if (b == 0x81) ictStage[i] = 3;
     }
     if (portCount[i] && (now - portLast[i] > 40 || portCount[i] >= 24)) {
